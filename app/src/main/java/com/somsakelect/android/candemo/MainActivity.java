@@ -10,13 +10,13 @@ import android.widget.Button;
 import com.cpdevice.cpcomm.boards.CPDEVICE;
 import com.cpdevice.cpcomm.common.CPCanFrameRxListener;
 import com.cpdevice.cpcomm.common.SocketCanFrameRxListener;
+import com.cpdevice.cpcomm.common.ValueChangedListener;
 import com.cpdevice.cpcomm.datalink.CPV1DataLink;
 import com.cpdevice.cpcomm.datalink.CPV3DataLink;
 import com.cpdevice.cpcomm.datalink.DataLink;
 import com.cpdevice.cpcomm.datalink.DefaultDataLink;
 import com.cpdevice.cpcomm.exception.CPBusException;
 import com.cpdevice.cpcomm.frame.ICPCanFrame;
-import com.cpdevice.cpcomm.frame.ISocketCanFrame;
 import com.cpdevice.cpcomm.port.Port;
 import com.cpdevice.cpcomm.port.SocketCan;
 import com.cpdevice.cpcomm.port.SpiPort;
@@ -26,14 +26,14 @@ import com.cpdevice.cpcomm.proto.CPV3Protocol;
 import com.cpdevice.cpcomm.proto.Protocol;
 import com.cpdevice.cpcomm.proto.SocketCanProtocol;
 
-import java.util.function.LongFunction;
+import java.util.Arrays;
 
 public class MainActivity extends AppCompatActivity {
     private static final String TAG = "MainActivity";
 
     SpiPort      mSpi0;           //port
-    CPV3DataLink mCPV3DataLink0;  //datalink
-    CPV3Protocol mCPV3Protocol0;  //protocol
+    CPV1DataLink cpv1DataLink;  //datalink
+    CPV1Protocol cpv1Protocol;  //protocol
 
     SocketCan mSocketCan0;
     DefaultDataLink mDataLink0;
@@ -96,24 +96,26 @@ public class MainActivity extends AppCompatActivity {
         try {
             //Two channels of CAN are transmitted through one SpiPort
             mSpi0 = new SpiPort(CPDEVICE.TANK2.SPI2_0, CPDEVICE.TANK2.SPI_DATA_IND, true);
-            mCPV3DataLink0 = new CPV3DataLink();
-            mCPV3Protocol0 = new CPV3Protocol();
+            cpv1DataLink = new CPV1DataLink();
+            cpv1Protocol = new CPV1Protocol();
+            //Configure bus parameters
+            cpv1Protocol.config(Protocol.CAN_BAUD_250K, Protocol.CAN_BAUD_250K);
             //Register the data listening callback
-            mCPV3Protocol0.setCanFrameRxListener(new CPCanFrameRxListener() {
+            cpv1Protocol.setCanFrameRxListener(new CPCanFrameRxListener() {
                 @Override
                 public void onReceive(int channel, int id, boolean idType, boolean remote, int dlc, byte[] canpack) {
-                    Log.w(TAG, String.format("0x%x, mcu%d, %b, %b, %d\r\n%s\r\n", id, channel, idType, remote, dlc, byte2String(canpack)));
+                    Log.w(TAG, String.format("[0x%x, mcu%d, %b, %b, %d] %s\r\n", id, channel, idType, remote, dlc, byte2String(canpack)));
                     if (channel == ICPCanFrame.Channel.CHN_1.ordinal()) {
                         // recvice MCU CHANNEL1 CAN MESSAGE
+
                     } else if (channel == ICPCanFrame.Channel.CHN_2.ordinal()) {
                         // recvice MCU CHANNEL2 CAN MESSAGE
                     }
                 }
             });
-            //Configure bus parameters
-            mCPV3Protocol0.config(Protocol.CAN_BAUD_250K, Protocol.CAN_BAUD_250K);
+            cpv1Protocol.setDebug(true);
             //Establish virtual bus channel
-            mCPV3Protocol0.connect(mCPV3DataLink0, mSpi0);
+            cpv1Protocol.connect(cpv1DataLink, mSpi0);
         } catch (CPBusException e) {//catch bus excpetion
             e.printStackTrace();
             Log.e(TAG, "runMcuCan: Error: "+e.getMessage());
@@ -122,31 +124,26 @@ public class MainActivity extends AppCompatActivity {
 
     private void sendMcuCan() {
         byte[] mCanPack = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, (byte) 0x88};
-        if (mCPV3Protocol0.isReady()) { //CPV3 need detect bus is ready!
+        if (cpv1Protocol.isReady()) { //CPV1 need detect bus is ready!
             //send to mcu can channel 1
-            mCPV3Protocol0.sendCanFrame(ICPCanFrame.Channel.CHN_1.ordinal(), 0x108, false, false, 8, mCanPack);
+            cpv1Protocol.sendCanFrame(ICPCanFrame.Channel.CHN_1.ordinal(), 0x18109944, true, false, 8, mCanPack);
             //send to mcu can channel 2
-            mCPV3Protocol0.sendCanFrame(ICPCanFrame.Channel.CHN_2.ordinal(), 0x108, false, false, 8, mCanPack);
+            cpv1Protocol.sendCanFrame(ICPCanFrame.Channel.CHN_2.ordinal(), 0x18095588, true, false, 8, mCanPack);
         }else
         {
-            Log.e(TAG, "mCPV3Protocol not ready!");
+            Log.e(TAG, "cpv1Protocol not ready!");
         }
-
-//        //send to mcu can channel 1
-//        mCPV3Protocol0.sendCanFrame(ICPCanFrame.Channel.CHN_1.ordinal(), 0x18024586, false, false, 8, mCanPack2);
-//        //send to mcu can channel 2
-//        mCPV3Protocol0.sendCanFrame(ICPCanFrame.Channel.CHN_2.ordinal(), 0x18024589, false, false, 8, mCanPack2);
     }
 
     private void clearMcuCan()
     {
         //CPV3 release
-        if (mCPV3Protocol0 != null) {
-            mCPV3Protocol0.disconnect();
-            mCPV3Protocol0.release();
+        if (cpv1Protocol != null) {
+            cpv1Protocol.disconnect();
+            cpv1Protocol.release();
         }
-        if (mCPV3DataLink0 != null) {
-            mCPV3DataLink0.release();
+        if (cpv1DataLink != null) {
+            cpv1DataLink.release();
         }
         if (mSpi0 != null) {
             mSpi0.release();
@@ -170,7 +167,7 @@ public class MainActivity extends AppCompatActivity {
                 @Override
                 public void onCanFdReceive(int id, int flags, int datalen, byte[] canpack) {
                     rxcount[0]++;
-                    Log.w(TAG, String.format("can0:0x%x, 0x%x, %d [%d]\n %s", id, flags, datalen, rxcount[0], byte2String(canpack)));
+                    Log.w(TAG, String.format("can0:0x%x, 0x%x, %d [%d], %s", id, flags, datalen, rxcount[0], byte2String(canpack)));
                     if (id == 0x101 && datalen == 12 && canpack[11] == 0x11 && canpack[0] == (byte) 0xCC) {
                         //向虚拟总线发送数据
                         mSocketCanProtocol0.sendCanfdFrame(0x102, SocketCanProtocol.CANFD_BRS, 12, mCanPack);
